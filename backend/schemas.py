@@ -1,0 +1,63 @@
+from pydantic import BaseModel
+from typing import List
+
+class MealRequest(BaseModel):
+    goal: str
+    diet: str
+    time: str
+
+class NutritionInfo(BaseModel):
+    calories: int
+    protein_g: int
+    carbs_g: int
+    fat_g: int
+    fiber_g: int
+
+class Ingredient(BaseModel):
+    name: str
+    quantity: float
+    unit: str
+
+class MealDetails(BaseModel):
+    name: str
+    description: str
+    region: str
+    cuisine: str
+    calories: int
+    protein_g: int
+    prep_minutes: int
+    cook_minutes: int
+    spice_level: str
+    servings: int
+    tags: List[str]
+    ingredients: List[Ingredient]
+    nutrition: NutritionInfo
+    instructions: List[str]
+
+class DailyMeals(BaseModel):
+    breakfast: MealDetails
+    lunch: MealDetails
+    dinner: MealDetails
+
+class MealPlanResponse(BaseModel):
+    summary: str
+    meals: DailyMeals
+    tips: List[str]
+    shopping_focus: List[str]
+
+# --- Tool Calling & Agentic Workflow Schemas ---
+
+class SearchRecipesInput(BaseModel):
+    diet: str
+    max_prep_time: int
+    keywords: str
+    meal_type: str
+
+class SubmitMealPlanInput(BaseModel):
+    breakfast_recipe_name: str
+    lunch_recipe_name: str
+    dinner_recipe_name: str
+
+class EvaluationResult(BaseModel):
+    passed: bool
+    errors: List[str]
