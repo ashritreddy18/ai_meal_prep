@@ -5,13 +5,19 @@ class MealRequest(BaseModel):
     goal: str
     diet: str
     time: str
+    allergies: List[str] = []
+    calorie_target: int = 0
+    protein_target: int = 0
+    preferred_cuisine: str = ""
+    disliked_ingredients: List[str] = []
+    preferred_ingredients: List[str] = []
 
 class NutritionInfo(BaseModel):
     calories: int
-    protein_g: int
-    carbs_g: int
-    fat_g: int
-    fiber_g: int
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+    fiber_g: float
 
 class Ingredient(BaseModel):
     name: str
@@ -24,7 +30,7 @@ class MealDetails(BaseModel):
     region: str
     cuisine: str
     calories: int
-    protein_g: int
+    protein_g: float
     prep_minutes: int
     cook_minutes: int
     spice_level: str
@@ -61,3 +67,4 @@ class SubmitMealPlanInput(BaseModel):
 class EvaluationResult(BaseModel):
     passed: bool
     errors: List[str]
+    soft_warnings: List[str] = []

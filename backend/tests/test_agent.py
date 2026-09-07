@@ -75,7 +75,7 @@ def test_revision_loop_and_schema(mock_create):
     mock_tc_2 = MagicMock()
     mock_tc_2.id = "call_2"
     mock_tc_2.function.name = "submit_meal_plan"
-    mock_tc_2.function.arguments = '{"breakfast_recipe_name": "Paneer Stew", "lunch_recipe_name": "Dal Makhani", "dinner_recipe_name": "Paneer Tikka Masala"}'
+    mock_tc_2.function.arguments = '{"breakfast_recipe_name": "Masala Dosa", "lunch_recipe_name": "Bisi Bele Bath", "dinner_recipe_name": "Palak Paneer"}'
     mock_msg_2.tool_calls = [mock_tc_2]
     
     mock_choice_1 = MagicMock()
@@ -94,9 +94,9 @@ def test_revision_loop_and_schema(mock_create):
     plan = generate_agentic_meal_plan(req)
     
     assert mock_create.call_count == 2
-    assert plan.meals.breakfast.name == "Paneer Stew"
-    assert plan.meals.lunch.name == "Dal Makhani"
-    assert plan.meals.dinner.name == "Paneer Tikka Masala"
+    assert plan.meals.breakfast.name == "Masala Dosa"
+    assert plan.meals.lunch.name == "Bisi Bele Bath"
+    assert plan.meals.dinner.name == "Palak Paneer"
 
 from fastapi.testclient import TestClient
 from main import app

@@ -72,7 +72,7 @@ def initialize_database():
 # Run initialization on import
 initialize_database()
 
-def search_recipes(query: str, max_prep_time: int = 120, diet: str = None, meal_type: str = None, limit: int = 3):
+def search_recipes(query: str, max_prep_time: int = 120, diet: str = None, meal_type: str = None, limit: int = 3, allergies: list = None):
     """
     Search for recipes matching the query and constraints.
     """
@@ -105,6 +105,24 @@ def search_recipes(query: str, max_prep_time: int = 120, diet: str = None, meal_
                 continue
                 
         recipe = json.loads(meta['full_json'])
+        
+        # Hard constraint: Allergies
+        if allergies:
+            skip = False
+            for allergy in allergies:
+                allergy_lower = allergy.lower().strip()
+                if not allergy_lower:
+                    continue
+                if allergy_lower in recipe['name'].lower():
+                    skip = True
+                    break
+                for ing in recipe['ingredients']:
+                    if allergy_lower in ing['name'].lower():
+                        skip = True
+                        break
+            if skip:
+                continue
+
         # Strip some heavy unneeded data if necessary, or just return it
         valid_recipes.append(recipe)
         

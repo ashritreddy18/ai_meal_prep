@@ -57,6 +57,124 @@ const API_BASE_CANDIDATES = unique(
     .map(normalizeBaseUrl)
 );
 
+const SelectField = ({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (nextValue: string) => void;
+  options: SelectOption[];
+}) => (
+  <div>
+    <label htmlFor={id} className="mb-1 block text-sm font-medium text-stone-700">
+      {label}
+    </label>
+    <div className="relative">
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full appearance-none rounded-xl border border-stone-300 bg-white px-3 py-2.5 pr-10 text-sm font-medium text-stone-800 shadow-sm transition hover:border-stone-400 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+
+      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-stone-500">
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-4 w-4"
+          aria-hidden="true"
+        >
+          <path
+            d="M5 7.5L10 12.5L15 7.5"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+    </div>
+  </div>
+);
+
+const InputField = ({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (nextValue: string) => void;
+  placeholder?: string;
+  type?: string;
+}) => (
+  <div>
+    <label htmlFor={id} className="mb-1 block text-sm font-medium text-stone-700">
+      {label}
+    </label>
+    <input
+      id={id}
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm font-medium text-stone-800 shadow-sm transition hover:border-stone-400 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20"
+    />
+  </div>
+);
+
+const MealCard = ({
+  title,
+  emoji,
+  meal,
+  isActive,
+  onClick,
+}: {
+  title: string;
+  emoji: string;
+  meal?: MealDetails;
+  isActive?: boolean;
+  onClick?: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-full rounded-2xl border bg-white p-5 text-left shadow-sm transition ${
+      isActive ? "border-emerald-600 ring-1 ring-emerald-600/15" : "border-stone-200 hover:border-stone-300"
+    }`}
+    aria-pressed={isActive}
+  >
+    <div className="mb-2 flex items-center gap-2">
+      <span className="text-xl">{emoji}</span>
+      <h3 className="text-lg font-semibold text-stone-800">{title}</h3>
+    </div>
+    <p className="font-medium text-stone-900">{meal?.name ?? "-"}</p>
+    <p className="mt-1 text-sm text-stone-600">{meal?.description ?? "No description"}</p>
+    <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-stone-600">
+      <div className="rounded-md bg-stone-50 p-2">{meal?.calories ?? "-"} kcal</div>
+      <div className="rounded-md bg-stone-50 p-2">{meal?.protein_g ?? "-"}g protein</div>
+      <div className="rounded-md bg-stone-50 p-2">{meal?.prep_minutes ?? "-"} min</div>
+    </div>
+    <p className="mt-3 text-xs font-medium text-stone-500">Tap for details</p>
+  </button>
+);
+
 export default function MealPlannerPage() {
   const [apiBaseUrl, setApiBaseUrl] = useState(API_BASE_CANDIDATES[0] ?? "http://127.0.0.1:8000");
   const [resolvedApi, setResolvedApi] = useState<{ base: string; path: string } | null>(null);
@@ -64,6 +182,13 @@ export default function MealPlannerPage() {
   const [goal, setGoal] = useState("fat loss");
   const [diet, setDiet] = useState("vegetarian");
   const [time, setTime] = useState("quick (<=30 min)");
+
+  const [allergies, setAllergies] = useState("");
+  const [dislikedIngredients, setDislikedIngredients] = useState("");
+  const [preferredIngredients, setPreferredIngredients] = useState("");
+  const [preferredCuisine, setPreferredCuisine] = useState("");
+  const [calorieTarget, setCalorieTarget] = useState("");
+  const [proteinTarget, setProteinTarget] = useState("");
 
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [loading, setLoading] = useState(false);
@@ -93,57 +218,6 @@ export default function MealPlannerPage() {
     { value: "flexible", label: "Flexible" },
   ];
 
-  const SelectField = ({
-    id,
-    label,
-    value,
-    onChange,
-    options,
-  }: {
-    id: string;
-    label: string;
-    value: string;
-    onChange: (nextValue: string) => void;
-    options: SelectOption[];
-  }) => (
-    <div>
-      <label htmlFor={id} className="mb-1 block text-sm font-medium text-stone-700">
-        {label}
-      </label>
-      <div className="relative">
-        <select
-          id={id}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-xl border border-stone-300 bg-white px-3 py-2.5 pr-10 text-sm font-medium text-stone-800 shadow-sm transition hover:border-stone-400 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20"
-        >
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-
-        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-stone-500">
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4"
-            aria-hidden="true"
-          >
-            <path
-              d="M5 7.5L10 12.5L15 7.5"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </span>
-      </div>
-    </div>
-  );
 
   const extractErrorDetail = async (response: Response) => {
     try {
@@ -229,12 +303,23 @@ export default function MealPlannerPage() {
 
     try {
       const target = resolvedApi ?? (await findMealPlannerApi());
+      const payload = {
+        goal,
+        diet,
+        time,
+        allergies: allergies.split(",").map((s) => s.trim()).filter(Boolean),
+        disliked_ingredients: dislikedIngredients.split(",").map((s) => s.trim()).filter(Boolean),
+        preferred_ingredients: preferredIngredients.split(",").map((s) => s.trim()).filter(Boolean),
+        preferred_cuisine: preferredCuisine.trim(),
+        calorie_target: parseInt(calorieTarget) || 0,
+        protein_target: parseInt(proteinTarget) || 0,
+      };
       const response = await fetch(`${target.base}${target.path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ goal, diet, time }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -262,41 +347,6 @@ export default function MealPlannerPage() {
     }
   };
 
-  const MealCard = ({
-    title,
-    emoji,
-    meal,
-    isActive,
-    onClick,
-  }: {
-    title: string;
-    emoji: string;
-    meal?: MealDetails;
-    isActive?: boolean;
-    onClick?: () => void;
-  }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full rounded-2xl border bg-white p-5 text-left shadow-sm transition ${
-        isActive ? "border-emerald-600 ring-1 ring-emerald-600/15" : "border-stone-200 hover:border-stone-300"
-      }`}
-      aria-pressed={isActive}
-    >
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-xl">{emoji}</span>
-        <h3 className="text-lg font-semibold text-stone-800">{title}</h3>
-      </div>
-      <p className="font-medium text-stone-900">{meal?.name ?? "-"}</p>
-      <p className="mt-1 text-sm text-stone-600">{meal?.description ?? "No description"}</p>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-stone-600">
-        <div className="rounded-md bg-stone-50 p-2">{meal?.calories ?? "-"} kcal</div>
-        <div className="rounded-md bg-stone-50 p-2">{meal?.protein_g ?? "-"}g protein</div>
-        <div className="rounded-md bg-stone-50 p-2">{meal?.prep_minutes ?? "-"} min</div>
-      </div>
-      <p className="mt-3 text-xs font-medium text-stone-500">Tap for details</p>
-    </button>
-  );
 
   return (
     <main className="min-h-screen bg-stone-100 p-4 md:p-8">
@@ -313,6 +363,20 @@ export default function MealPlannerPage() {
             <SelectField id="goal" label="Goal" value={goal} onChange={setGoal} options={goalOptions} />
             <SelectField id="diet" label="Diet Preference" value={diet} onChange={setDiet} options={dietOptions} />
             <SelectField id="time" label="Time Availability" value={time} onChange={setTime} options={timeOptions} />
+            
+            <div className="border-t border-stone-200 pt-4 mt-4">
+              <h3 className="text-sm font-semibold text-stone-800 mb-3">Optional Personalizations</h3>
+              <div className="space-y-4">
+                <InputField id="allergies" label="Allergies (comma separated)" value={allergies} onChange={setAllergies} placeholder="e.g. peanuts, dairy" />
+                <InputField id="disliked" label="Disliked Ingredients (comma separated)" value={dislikedIngredients} onChange={setDislikedIngredients} placeholder="e.g. mushrooms, okra" />
+                <InputField id="preferred" label="Preferred Ingredients (comma separated)" value={preferredIngredients} onChange={setPreferredIngredients} placeholder="e.g. paneer, spinach" />
+                <InputField id="cuisine" label="Preferred Regional Cuisine" value={preferredCuisine} onChange={setPreferredCuisine} placeholder="e.g. South Indian, Punjabi" />
+                <div className="grid grid-cols-2 gap-4">
+                  <InputField id="cal" label="Daily Calorie Target" type="number" value={calorieTarget} onChange={setCalorieTarget} placeholder="e.g. 2000" />
+                  <InputField id="pro" label="Daily Protein Target (g)" type="number" value={proteinTarget} onChange={setProteinTarget} placeholder="e.g. 100" />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-3">

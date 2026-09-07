@@ -36,8 +36,9 @@ def calculate_meal_nutrition(breakfast, lunch, dinner):
 
 def check_recipe_constraints(breakfast, lunch, dinner, request: MealRequest, prep_time_limit: int):
     errors = []
+    warnings = []
     
-    # Check Time
+    # Check Time (Hard)
     if breakfast['prep_minutes'] + breakfast.get('cook_minutes', 0) > prep_time_limit:
         errors.append(f"Breakfast prep+cook time ({breakfast['prep_minutes']+breakfast.get('cook_minutes', 0)}m) exceeds limit ({prep_time_limit}m).")
     if lunch['prep_minutes'] + lunch.get('cook_minutes', 0) > prep_time_limit:
@@ -45,7 +46,7 @@ def check_recipe_constraints(breakfast, lunch, dinner, request: MealRequest, pre
     if dinner['prep_minutes'] + dinner.get('cook_minutes', 0) > prep_time_limit:
         errors.append(f"Dinner prep+cook time ({dinner['prep_minutes']+dinner.get('cook_minutes', 0)}m) exceeds limit ({prep_time_limit}m).")
         
-    # Check Diet
+    # Check Diet (Hard)
     req_diet = request.diet.lower()
     if req_diet not in [d.lower() for d in breakfast['diets']]:
         errors.append(f"Breakfast '{breakfast['name']}' is not {req_diet}.")
@@ -54,12 +55,74 @@ def check_recipe_constraints(breakfast, lunch, dinner, request: MealRequest, pre
     if req_diet not in [d.lower() for d in dinner['diets']]:
         errors.append(f"Dinner '{dinner['name']}' is not {req_diet}.")
 
-    # Duplicate check
+    # Check Duplicate (Hard)
     names = [breakfast['name'], lunch['name'], dinner['name']]
     if len(set(names)) != 3:
         errors.append("You selected the same recipe for multiple meals.")
+        
+    # Check Allergies (Hard)
+    for meal_name, r in [('Breakfast', breakfast), ('Lunch', lunch), ('Dinner', dinner)]:
+        if request.allergies:
+            for allergy in request.allergies:
+                al = allergy.lower().strip()
+                if not al: continue
+                if al in r['name'].lower():
+                    errors.append(f"{meal_name} '{r['name']}' contains allergy '{allergy}'.")
+                    continue
+                for ing in r['ingredients']:
+                    if al in ing['name'].lower():
+                        errors.append(f"{meal_name} '{r['name']}' contains allergy '{allergy}'.")
+                        break
 
-    return errors
+        # Check Disliked (Soft)
+        if request.disliked_ingredients:
+            for dislike in request.disliked_ingredients:
+                dl = dislike.lower().strip()
+                if not dl: continue
+                if dl in r['name'].lower():
+                    warnings.append(f"{meal_name} '{r['name']}' contains disliked food '{dislike}'.")
+                    continue
+                for ing in r['ingredients']:
+                    if dl in ing['name'].lower():
+                        warnings.append(f"{meal_name} '{r['name']}' contains disliked food '{dislike}'.")
+                        break
+
+        # Check Cuisine (Soft)
+        if request.preferred_cuisine:
+            pc = request.preferred_cuisine.lower().strip()
+            rc = r.get('cuisine', '').lower()
+            rr = r.get('region', '').lower()
+            if pc not in rc and pc not in rr:
+                warnings.append(f"{meal_name} '{r['name']}' does not match preferred cuisine '{request.preferred_cuisine}'.")
+
+    # Check Preferred Ingredients (Soft)
+    if request.preferred_ingredients:
+        pref_met = False
+        for pref in request.preferred_ingredients:
+            p = pref.lower().strip()
+            if not p: continue
+            for r in [breakfast, lunch, dinner]:
+                if p in r['name'].lower():
+                    pref_met = True
+                    break
+                for ing in r['ingredients']:
+                    if p in ing['name'].lower():
+                        pref_met = True
+                        break
+        if not pref_met:
+            warnings.append("None of the meals contain your preferred ingredients.")
+
+    # Check Macros (Soft)
+    if request.calorie_target > 0 or request.protein_target > 0:
+        cal, prot = calculate_meal_nutrition(breakfast, lunch, dinner)
+        if request.calorie_target > 0:
+            if cal < request.calorie_target * 0.8 or cal > request.calorie_target * 1.2:
+                warnings.append(f"Total calories ({cal}) is far from your target ({request.calorie_target}).")
+        if request.protein_target > 0:
+            if prot < request.protein_target * 0.8:
+                warnings.append(f"Total protein ({prot}g) is below your target ({request.protein_target}g).")
+
+    return errors, warnings
 
 def evaluate_meal_plan(candidate_args: dict, request: MealRequest, prep_time_limit: int):
     b_name = candidate_args.get("breakfast_recipe_name")
@@ -82,13 +145,13 @@ def evaluate_meal_plan(candidate_args: dict, request: MealRequest, prep_time_lim
         errors.append(f"Dinner recipe '{d_name}' not found in knowledge base.")
         
     if errors:
-        return {"passed": False, "errors": errors}
+        return {"passed": False, "errors": errors, "soft_warnings": []}
         
-    constraint_errors = check_recipe_constraints(b_recipe, l_recipe, d_recipe, request, prep_time_limit)
+    constraint_errors, constraint_warnings = check_recipe_constraints(b_recipe, l_recipe, d_recipe, request, prep_time_limit)
     if constraint_errors:
-        return {"passed": False, "errors": constraint_errors}
+        return {"passed": False, "errors": constraint_errors, "soft_warnings": constraint_warnings}
         
-    return {"passed": True, "errors": []}
+    return {"passed": True, "errors": [], "soft_warnings": constraint_warnings}
 
 def format_recipe(r):
     return {
@@ -101,6 +164,7 @@ def format_recipe(r):
         "prep_minutes": r["prep_minutes"],
         "cook_minutes": r.get("cook_minutes", 0),
         "spice_level": r.get("spice_level", ""),
+        "servings": r.get("servings", 1),
         "tags": r.get("tags", []),
         "ingredients": r["ingredients"],
         "nutrition": r["nutrition"],
@@ -117,13 +181,20 @@ USER CONSTRAINTS:
 Goal: {request.goal}
 Diet: {request.diet}
 Max Prep Time Per Meal: {prep_time} mins
+Allergies: {', '.join(request.allergies) if request.allergies else 'None'}
+Disliked Ingredients: {', '.join(request.disliked_ingredients) if request.disliked_ingredients else 'None'}
+Preferred Cuisine: {request.preferred_cuisine if request.preferred_cuisine else 'None'}
+Preferred Ingredients: {', '.join(request.preferred_ingredients) if request.preferred_ingredients else 'None'}
+Calorie Target: {request.calorie_target if request.calorie_target > 0 else 'None'}
+Protein Target: {request.protein_target if request.protein_target > 0 else 'None'}
 
 RULES:
-1. You MUST use the `search_recipes` tool to search our knowledge base for authentic Indian recipes.
+1. You MUST use the `search_recipes` tool to search our knowledge base. Make sure to generate a rich `keywords` query that combines relevant soft preferences (e.g. "South Indian high protein dinner").
 2. DO NOT invent recipes. Only use recipes returned by `search_recipes`.
-3. Once you have found 3 valid recipes that meet the diet and time constraints, use `submit_meal_plan` to evaluate them.
-4. If your plan fails evaluation, you will receive errors. You must then search for different recipes and submit again.
-5. If you cannot find valid recipes to meet the constraints after searching, you MUST call `terminate_plan` with a reason. Do not silently relax hard constraints (diet, max prep time).
+3. Once you have found 3 valid recipes that meet the constraints, use `submit_meal_plan` to evaluate them.
+4. Hard constraints (Diet, Allergies, Max Time) MUST be met. If your plan fails hard constraints, you will receive errors. You MUST search again.
+5. Soft preferences (Cuisine, Likes, Dislikes) should be satisfied if possible. If you receive `soft_warnings` upon submission, you can choose to accept the plan anyway if no better alternatives exist, OR you can search again to improve it. To accept it, call submit_meal_plan again with the exact same recipes.
+6. If you cannot find valid recipes to meet the HARD constraints after searching, you MUST call `terminate_plan` with a reason. Do not silently relax hard constraints.
 """
 
     messages = [
@@ -184,6 +255,7 @@ RULES:
     max_iterations = 6
     iterations = 0
     final_plan_args = None
+    best_candidate = None
     
     while iterations < max_iterations:
         iterations += 1
@@ -231,7 +303,8 @@ RULES:
                     max_prep_time=args.get("max_prep_time", prep_time),
                     diet=args.get("diet", request.diet),
                     meal_type=args.get("meal_type"),
-                    limit=3
+                    limit=3,
+                    allergies=request.allergies
                 )
                 
                 formatted_results = []
@@ -260,11 +333,29 @@ RULES:
                 eval_result = evaluate_meal_plan(args, request, prep_time)
                 
                 if eval_result["passed"]:
-                    print("Agent Evaluation: PASSED")
-                    final_plan_args = args
-                    plan_submitted = True
-                    # Do not append tool response here, since we are breaking the loop
-                    break
+                    if not eval_result.get("soft_warnings"):
+                        print("Agent Evaluation: PASSED perfectly.")
+                        final_plan_args = args
+                        plan_submitted = True
+                        break
+                    else:
+                        print(f"Agent Evaluation: PASSED with warnings: {eval_result['soft_warnings']}")
+                        if args == best_candidate:
+                            print("Agent Evaluation: Confirmed previous plan.")
+                            final_plan_args = args
+                            plan_submitted = True
+                            break
+                        
+                        best_candidate = args
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({
+                                "status": "passed_with_warnings", 
+                                "soft_warnings": eval_result["soft_warnings"], 
+                                "message": "Your plan met all hard constraints but missed some soft preferences. To try to improve it, use search_recipes. To accept this plan anyway, call submit_meal_plan again with these exact same recipe names."
+                            })
+                        })
                 else:
                     print(f"Agent Evaluation: FAILED. {eval_result['errors']}")
                     messages.append({
