@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 from schemas import MealRequest, SearchRecipesInput, SubmitMealPlanInput
 from agent import (
     search_recipes,
-    check_recipe_constraints,
+    check_hard_constraints,
     calculate_meal_nutrition,
     evaluate_meal_plan,
     generate_agentic_meal_plan,
@@ -50,8 +50,8 @@ def test_evaluation_invalid_plan():
         "dinner_recipe_name": "Tofu & Vegetable Curry with Moong Dal"
     }
     res = evaluate_meal_plan(args, req, 30)
-    assert res["passed"] == False
-    assert "not found in knowledge base" in str(res["errors"])
+    assert res["hard_constraints"]["passed"] == False
+    assert "not found in knowledge base" in str(res["hard_constraints"]["errors"])
 
 @patch('agent.client.chat.completions.create')
 def test_revision_loop_and_schema(mock_create):

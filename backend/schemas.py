@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 class MealRequest(BaseModel):
     goal: str
@@ -64,7 +64,22 @@ class SubmitMealPlanInput(BaseModel):
     lunch_recipe_name: str
     dinner_recipe_name: str
 
-class EvaluationResult(BaseModel):
+class QualityBreakdown(BaseModel):
+    calories: Optional[float] = None
+    protein: Optional[float] = None
+    cuisine: Optional[float] = None
+    preferred_ingredients: Optional[float] = None
+    disliked_ingredients: Optional[float] = None
+    meal_suitability: Optional[float] = None
+    diversity: Optional[float] = None
+
+class HardConstraintsResult(BaseModel):
     passed: bool
     errors: List[str]
-    soft_warnings: List[str] = []
+
+class EvaluationResult(BaseModel):
+    hard_constraints: HardConstraintsResult
+    quality_score: int
+    quality_band: str
+    breakdown: QualityBreakdown
+    improvements: List[str]
