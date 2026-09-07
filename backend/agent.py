@@ -9,6 +9,8 @@ from rag import search_recipes, RECIPES_PATH
 class ImpossibleConstraintsError(Exception):
     pass
 
+MAX_REVISION_ATTEMPTS = 6
+
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -257,6 +259,40 @@ def calculate_quality_score(recipes, request: MealRequest):
         
     return final_score, get_quality_band(final_score), breakdown, improvements
 
+def analyze_dimensions(breakdown: dict) -> Tuple[list, list]:
+    weak = []
+    strong = []
+    
+    if breakdown.get("calories") is not None:
+        if breakdown["calories"] < 20: weak.append("Calories")
+        else: strong.append("Calories")
+        
+    if breakdown.get("protein") is not None:
+        if breakdown["protein"] < 16: weak.append("Protein")
+        else: strong.append("Protein")
+        
+    if breakdown.get("cuisine") is not None:
+        if breakdown["cuisine"] < 10: weak.append("Preferred Cuisine")
+        else: strong.append("Preferred Cuisine")
+        
+    if breakdown.get("preferred_ingredients") is not None:
+        if breakdown["preferred_ingredients"] < 5: weak.append("Preferred Ingredients")
+        else: strong.append("Preferred Ingredients")
+        
+    if breakdown.get("disliked_ingredients") is not None:
+        if breakdown["disliked_ingredients"] < 5: weak.append("Disliked Ingredients")
+        else: strong.append("Disliked Ingredients")
+        
+    if breakdown.get("meal_suitability") is not None:
+        if breakdown["meal_suitability"] < 7: weak.append("Meal Suitability")
+        else: strong.append("Meal Suitability")
+        
+    if breakdown.get("diversity") is not None:
+        if breakdown["diversity"] < 7: weak.append("Diversity")
+        else: strong.append("Diversity")
+        
+    return weak, strong
+
 def evaluate_meal_plan(candidate_args: dict, request: MealRequest, prep_time_limit: int) -> dict:
     b_name = candidate_args.get("breakfast_recipe_name")
     l_name = candidate_args.get("lunch_recipe_name")
@@ -323,32 +359,14 @@ def format_recipe(r):
 def generate_agentic_meal_plan(request: MealRequest) -> MealPlanResponse:
     prep_time = extract_time_minutes(request.time)
     
-    system_prompt = f"""You are an AI meal planning agent.
-Your task is to plan 1 breakfast, 1 lunch, and 1 dinner for the user.
-
-USER CONSTRAINTS:
-Goal: {request.goal}
-Diet: {request.diet}
-Max Prep Time Per Meal: {prep_time} mins
-Allergies: {', '.join(request.allergies) if request.allergies else 'None'}
-Disliked Ingredients: {', '.join(request.disliked_ingredients) if request.disliked_ingredients else 'None'}
-Preferred Cuisine: {request.preferred_cuisine if request.preferred_cuisine else 'None'}
-Preferred Ingredients: {', '.join(request.preferred_ingredients) if request.preferred_ingredients else 'None'}
-Calorie Target: {request.calorie_target if request.calorie_target > 0 else 'None'}
-Protein Target: {request.protein_target if request.protein_target > 0 else 'None'}
-
-RULES:
-1. You MUST use the `search_recipes` tool to search our knowledge base. Make sure to generate a rich `keywords` query that combines relevant soft preferences (e.g. "South Indian high protein dinner").
-2. DO NOT invent recipes. Only use recipes returned by `search_recipes`.
-3. Once you have found 3 valid recipes that meet the constraints, use `submit_meal_plan` to evaluate them.
-4. Hard constraints (Diet, Allergies, Max Time) MUST be met. If your plan fails hard constraints, you will receive errors. You MUST search again.
-5. Soft preferences (Cuisine, Likes, Dislikes, Nutrition) determine your quality score. You should aim for a score of 80 or higher. If your plan scores below 80, you will be told the required improvements and you MUST search for better alternatives.
-6. If you cannot find valid recipes to meet the HARD constraints after searching, you MUST call `terminate_plan` with a reason. Do not silently relax hard constraints.
-"""
-
+    best_candidate = None
+    best_candidate_score = -1
+    final_plan_args = None
+    evaluated_candidates = set()
+    
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Please start planning."}
+        {"role": "system", "content": "You are an expert AI meal planner. Your goal is to generate a personalized meal plan adhering to hard constraints and optimizing for user preferences. You MUST use the search_recipes tool to find valid recipes, and then use the submit_meal_plan tool. If evaluating a revision, actively correct the weak dimensions while maintaining the strong dimensions."},
+        {"role": "user", "content": f"Create a {request.goal} meal plan for a {request.diet} diet. Ensure each recipe prep time is under {prep_time} mins."}
     ]
     
     tools = [
@@ -401,15 +419,7 @@ RULES:
         }
     ]
     
-    max_iterations = 6
-    iterations = 0
-    final_plan_args = None
-    best_candidate = None
-    best_candidate_score = 0
-    
-    while iterations < max_iterations:
-        iterations += 1
-        
+    for attempt in range(MAX_REVISION_ATTEMPTS):
         completion = client.chat.completions.create(
             model="openai/gpt-4o-mini",
             messages=messages,
@@ -423,7 +433,6 @@ RULES:
         
         msg = completion.choices[0].message
         
-        # Serialize the message for appending
         msg_dict = {"role": msg.role, "content": msg.content or ""}
         if msg.tool_calls:
             msg_dict["tool_calls"] = [{"id": t.id, "type": "function", "function": {"name": t.function.name, "arguments": t.function.arguments}} for t in msg.tool_calls]
@@ -447,7 +456,6 @@ RULES:
                 continue
                 
             if tool_call.function.name == "search_recipes":
-                print(f"Agent Action: Searching for {args.get('meal_type')} ({args.get('keywords')})")
                 results = search_recipes(
                     query=args.get("keywords", ""),
                     max_prep_time=args.get("max_prep_time", prep_time),
@@ -467,36 +475,40 @@ RULES:
                         "nutrition": r["nutrition"]
                     })
                 
-                if not formatted_results:
-                    response_content = json.dumps({"error": "No suitable recipes found matching these constraints. Please relax soft constraints or change keywords. If hard constraints cannot be met, call terminate_plan."})
-                else:
-                    response_content = json.dumps(formatted_results)
-                    
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
-                    "content": response_content
+                    "content": json.dumps(formatted_results) if formatted_results else json.dumps({"error": "No recipes found."})
                 })
                 
             elif tool_call.function.name == "submit_meal_plan":
-                print(f"Agent Action: Submitting meal plan...")
+                candidate_sig = f"{args.get('breakfast_recipe_name')}|{args.get('lunch_recipe_name')}|{args.get('dinner_recipe_name')}"
+                if candidate_sig in evaluated_candidates:
+                    messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps({"status": "duplicate"})})
+                    continue
+                evaluated_candidates.add(candidate_sig)
+                
                 eval_result = evaluate_meal_plan(args, request, prep_time)
                 
                 if eval_result["hard_constraints"]["passed"]:
                     score = eval_result["quality_score"]
-                    print(f"Agent Evaluation: PASSED hard constraints with score {score} ({eval_result['quality_band']}).")
-                    
-                    if not best_candidate or score > best_candidate_score:
+                    is_improvement = not best_candidate or score > best_candidate_score
+                    if is_improvement:
                         best_candidate = args
                         best_candidate_score = score
                         
                     if score >= 80:
-                        print("Agent Evaluation: Score meets acceptance threshold. Accepting plan.")
                         final_plan_args = args
                         plan_submitted = True
                         break
                     else:
-                        print("Agent Evaluation: Score below threshold. Requesting improvement.")
+                        weak_dims, strong_dims = analyze_dimensions(eval_result["breakdown"])
+                        
+                        if is_improvement:
+                            msg_text = f"Your new plan scored {score}/100, which is an IMPROVEMENT and is now the best valid plan. However, it is still below the threshold (80). Please search for alternatives that specifically improve the weak areas, while preserving the strong areas."
+                        else:
+                            msg_text = f"Your new plan scored {score}/100, which is LOWER than the current best ({best_candidate_score}/100). The new plan has been rejected. Please review the weak dimensions and search for better alternatives."
+                            
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -504,24 +516,16 @@ RULES:
                                 "status": "passed_but_suboptimal",
                                 "quality_score": score,
                                 "quality_band": eval_result["quality_band"],
+                                "weak_dimensions": weak_dims,
+                                "strong_dimensions": strong_dims,
                                 "improvements_needed": eval_result["improvements"],
-                                "message": f"Your plan passed hard constraints but only scored {score}/100. Please use search_recipes to find alternatives that address the improvements needed. If this is the best you can do, you must keep searching anyway until you run out of attempts."
+                                "message": msg_text
                             })
                         })
                 else:
-                    print(f"Agent Evaluation: FAILED. {eval_result['hard_constraints']['errors']}")
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(eval_result)
-                    })
-                    messages.append({
-                        "role": "user",
-                        "content": "Your meal plan failed hard constraints. Read the errors above and use search_recipes to find different recipes."
-                    })
+                    messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(eval_result)})
                     
             elif tool_call.function.name == "terminate_plan":
-                print(f"Agent Action: Terminated plan. Reason: {args.get('reason')}")
                 raise ImpossibleConstraintsError(args.get("reason", "Impossible constraints"))
         
         if plan_submitted:
